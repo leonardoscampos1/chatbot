@@ -1,4 +1,3 @@
-
 # chatbot_inteligente.py
 import streamlit as st
 import pandas as pd
@@ -30,7 +29,7 @@ st.write("Apoio para pedir cadastro.")
 load_dotenv()
 
 # ==========================
-# 📌 Funções auxiliares
+# 📌 Utilidades
 # ==========================
 def extrair_cnpj(texto):
     padrao = r'\d{2}\.?\d{3}\.?\d{3}/?\d{4}-?\d{2}'
@@ -40,35 +39,57 @@ def extrair_cnpj(texto):
 def normalizar_cnpj(cnpj):
     return re.sub(r'\D', '', str(cnpj))
 
+
+# ==========================
+# ⚡ Carregar base na memória (UMA vez)
+# ==========================
+if "tabela_clientes" not in st.session_state:
+    with st.spinner("Carregando base de clientes..."):
+        try:
+            r = requests.get(URL_SQLITE)
+            r.raise_for_status()
+
+            # Criar arquivo temporário
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".db") as tmp:
+                tmp.write(r.content)
+                caminho_temp = tmp.name
+
+            # Ler banco
+            conn = sqlite3.connect(caminho_temp)
+            tabela_cliente = pd.read_sql("SELECT * FROM PCCLIENT", conn)
+            conn.close()
+
+            tabela_cliente.columns = tabela_cliente.columns.str.upper()
+            tabela_cliente["CGCENT"] = tabela_cliente["CGCENT"].astype(str).str.replace(r"\D", "", regex=True)
+
+            st.session_state.tabela_clientes = tabela_cliente
+        except Exception as e:
+            st.error(f"Erro ao carregar banco: {e}")
+
+
+# ==========================
+# 🔍 Consulta usando memória
+# ==========================
 def consulta_cliente(cnpj):
-    """Consulta o cliente no banco hospedado no link HBox"""
     try:
-        r = requests.get(URL_SQLITE)
-        r.raise_for_status()
-        
-        # Cria arquivo temporário com o conteúdo do banco
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".db") as tmp:
-            tmp.write(r.content)
-            caminho_temp = tmp.name
-
-        # Conecta ao banco temporário
-        conn = sqlite3.connect(caminho_temp)
-        tabela_cliente = pd.read_sql("SELECT * FROM PCCLIENT", conn)
-        conn.close()
-
-        tabela_cliente.columns = tabela_cliente.columns.str.upper()
+        tabela = st.session_state.tabela_clientes
         cnpj_norm = normalizar_cnpj(cnpj)
-        tabela_cliente["CGCENT"] = tabela_cliente["CGCENT"].apply(normalizar_cnpj)
 
-        resultado = tabela_cliente[tabela_cliente["CGCENT"] == cnpj_norm]
+        resultado = tabela[tabela["CGCENT"] == cnpj_norm]
+
         if not resultado.empty:
             codcli, cliente, cgc = resultado.iloc[0][["CODCLI", "CLIENTE", "CGCENT"]]
             return f"✅ O CNPJ {cgc} está cadastrado com o código {codcli} ({cliente})."
         else:
             return f"🚫 Não encontramos o CNPJ {cnpj} na base de clientes."
-    except Exception as e:
-        return f"❌ Erro ao consultar o banco: {e}"
 
+    except Exception as e:
+        return f"❌ Erro ao consultar: {e}"
+
+
+# ==========================
+# 📧 Enviar e-mail
+# ==========================
 def enviar_email_cadastro(cnpj, solicitante, destino="leonardo.campos@rigarr.com.br", copia=None):
     try:
         msg = EmailMessage()
@@ -86,7 +107,7 @@ O CNPJ {cnpj} não foi encontrado na base de clientes.
 Solicitante: {solicitante}
 
 Por favor, providenciem o cadastro.
-        """)
+""")
 
         with smtplib.SMTP_SSL("smtp.emailzimbraonline.com", 465) as smtp:
             smtp.login("leonardo.campos@rigarr.com.br", "Br@sil34@")
@@ -97,8 +118,9 @@ Por favor, providenciem o cadastro.
         print(f"Erro ao enviar e-mail: {e}")
         return False
 
+
 # ==========================
-# 🧠 Função responder GPT
+# 🧠 Motor GPT
 # ==========================
 prompt_template = """
 Você é um assistente útil e educado. 
@@ -123,14 +145,12 @@ def responder(pergunta, historico_chat, limite_historico=6):
     if pergunta_lower in saudacoes:
         return random.choice(respostas_saudacao)
 
-    # Histórico últimos turnos
     ultimos_turnos = historico_chat[-limite_historico:]
     historico_formatado = "\n".join([
         f"Usuário: {m.content}" if isinstance(m, HumanMessage) else f"Bot: {m.content}"
         for m in ultimos_turnos
     ])
 
-    # Base Chroma
     funcao_embedding = OpenAIEmbeddings()
     db = Chroma(persist_directory=CAMINHO_DB, embedding_function=funcao_embedding)
     resultados = db.similarity_search_with_relevance_scores(pergunta, k=3)
@@ -148,6 +168,7 @@ def responder(pergunta, historico_chat, limite_historico=6):
     resposta = chat.generate([[HumanMessage(content=prompt_formatado)]])
     return resposta.generations[0][0].text
 
+
 # ==========================
 # ⚙️ Sessão e histórico
 # ==========================
@@ -162,8 +183,9 @@ for msg in st.session_state.historico_chat:
     with st.chat_message("user" if isinstance(msg, HumanMessage) else "assistant"):
         st.markdown(msg.content)
 
+
 # ==========================
-# 🎛️ Menu de ações
+# 🎛️ Menu
 # ==========================
 col1, col2 = st.columns(2)
 
@@ -174,20 +196,6 @@ with col1:
         with st.chat_message("assistant"):
             st.markdown("Você escolheu **CADASTRO**. Quer que eu verifique o CNPJ? (Sim/Não)")
 
-# with col2:
-#     if st.button("NOTA"):
-#         st.session_state.acao_atual = "nota"
-#         st.session_state.historico_chat.append(HumanMessage(content="NOTA"))
-#         with st.chat_message("assistant"):
-#             st.markdown("Você escolheu **NOTA**. Qual número da nota deseja consultar?")
-
-# with col3:
-#     if st.button("LIMITE DE CRÉDITO"):
-#         st.session_state.acao_atual = "limite_credito"
-#         st.session_state.historico_chat.append(HumanMessage(content="LIMITE DE CRÉDITO"))
-#         with st.chat_message("assistant"):
-#             st.markdown("Você escolheu **LIMITE DE CRÉDITO**. Por favor, informe o cliente ou CNPJ.")
-
 with col2:
     if st.button("SAIR"):
         st.session_state.historico_chat = []
@@ -196,6 +204,7 @@ with col2:
             st.markdown("Conversa encerrada. Até logo! 👋")
         st.rerun()
 
+
 # ==========================
 # 💬 Entrada do usuário
 # ==========================
@@ -203,10 +212,14 @@ pergunta = st.chat_input("Digite sua mensagem...")
 
 if pergunta:
     st.session_state.historico_chat.append(HumanMessage(content=pergunta))
+
     with st.chat_message("user"):
         st.markdown(pergunta)
+
     with st.chat_message("assistant"):
         with st.spinner("Pensando..."):
+
+            # fluxo CADASTRO
             if st.session_state.acao_atual == "cadastro":
                 if pergunta.lower() in ["sim", "s", "yes"]:
                     st.markdown("Perfeito! Por favor, digite o CNPJ que deseja consultar.")
@@ -219,6 +232,7 @@ if pergunta:
                 cnpj_digitado = pergunta
                 st.session_state.cnpj_para_cadastro = cnpj_digitado
                 resposta = consulta_cliente(cnpj_digitado)
+
                 st.markdown(resposta)
                 st.session_state.historico_chat.append(AIMessage(content=resposta))
 
@@ -226,9 +240,6 @@ if pergunta:
                     st.markdown("Deseja enviar este CNPJ para o time de cadastro? (Sim/Não)")
                     st.session_state.acao_atual = "perguntar_envio"
 
-            # ========================================================
-            # 1️⃣ Usuário confirma que quer enviar para cadastro
-            # ========================================================
             elif st.session_state.acao_atual == "perguntar_envio":
                 if pergunta.lower() in ["sim", "s", "yes"]:
                     st.markdown("Perfeito! Qual é o seu e-mail para copiarmos no envio?")
@@ -237,20 +248,14 @@ if pergunta:
                     st.markdown("Ok, não será enviado para o cadastro.")
                     st.session_state.acao_atual = None
 
-            # ========================================================
-            # 2️⃣ Salvar e-mail informado e pedir confirmação final
-            # ========================================================
             elif st.session_state.acao_atual == "coletar_email":
                 st.session_state.email_usuario = pergunta.strip()
                 st.markdown(f"Confirmar envio do CNPJ com cópia para **{st.session_state.email_usuario}**? (Sim/Não)")
                 st.session_state.acao_atual = "confirmar_envio_email"
 
-            # ========================================================
-            # 3️⃣ Confirmação final e envio do e-mail
-            # ========================================================
             elif st.session_state.acao_atual == "confirmar_envio_email":
                 if pergunta.lower() in ["sim", "s", "yes"]:
-                    cnpj_envio = st.session_state.get("cnpj_para_cadastro", None)
+                    cnpj_envio = st.session_state.get("cnpj_para_cadastro")
                     email_copia = st.session_state.get("email_usuario")
 
                     if cnpj_envio and email_copia:
@@ -271,5 +276,3 @@ if pergunta:
                     st.markdown("Ok, envio cancelado.")
 
                 st.session_state.acao_atual = None
-
-
