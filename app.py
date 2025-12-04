@@ -21,6 +21,22 @@ import tempfile
 # ==========================
 URL_SQLITE = "https://hbox.houseti.com.br/s/D2nXxuYkkeuV6r3/download"
 CAMINHO_DB = r"C:\Users\LeonardoCampos\HBox\Off Trade\sistema\db"
+@st.cache_resource
+def carregar_base():
+    r = requests.get(URL_SQLITE)
+    r.raise_for_status()
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".db") as tmp:
+        tmp.write(r.content)
+        caminho_temp = tmp.name
+
+    conn = sqlite3.connect(caminho_temp)
+    df = pd.read_sql("SELECT CODCLI, CLIENTE, CGCENT FROM PCCLIENT", conn)
+    conn.close()
+
+    df.columns = df.columns.str.upper()
+    df["CGCENT"] = df["CGCENT"].astype(str).str.replace(r"\D", "", regex=True)
+    return df
 
 st.set_page_config(page_title="ChatBot Inteligente", page_icon="🤖", layout="wide")
 st.title("🤖 ChatBot OFF TRADE")
@@ -39,6 +55,7 @@ def extrair_cnpj(texto):
 def normalizar_cnpj(cnpj):
     return re.sub(r'\D', '', str(cnpj))
 
+tabela_cliente = carregar_base()
 
 # ==========================
 # ⚡ Carregar base na memória (UMA vez)
