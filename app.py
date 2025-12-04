@@ -24,8 +24,8 @@ URL_SQLITE = "https://hbox.houseti.com.br/s/D2nXxuYkkeuV6r3/download"
 CAMINHO_DB = r"C:\Users\LeonardoCampos\HBox\Off Trade\sistema\db"
 
 st.set_page_config(page_title="ChatBot Inteligente", page_icon="🤖", layout="wide")
-st.title("🤖 ChatBot Inteligente com Memória")
-st.write("Converse com o assistente com base na sua base de conhecimento Chroma e banco de clientes.")
+st.title("🤖 ChatBot OFF TRADE")
+st.write("Apoio para pedir cadastro.")
 
 load_dotenv()
 
@@ -271,4 +271,5 @@ if pergunta:
                     st.markdown("Ok, envio cancelado.")
 
                 st.session_state.acao_atual = None
+
 
